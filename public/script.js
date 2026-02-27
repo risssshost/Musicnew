@@ -451,4 +451,171 @@ function renderLibraryUI() {
                 </div>
                 <div class="lib-item-info">
                     <div class="lib-item-title">Lagu yang Disukai</div>
-                    <div class="lib-item-sub"><svg class="pin-icon" viewBox="0 0 24 24"><path d="M12 2L15 8l6 1-4.5 4.5L18 20l-6-3-6 3 1.5-6.5L3 9l6-1z"></path></svg> Playlist • $
+                    <div class="lib-item-sub"><svg class="pin-icon" viewBox="0 0 24 24"><path d="M12 2L15 8l6 1-4.5 4.5L18 20l-6-3-6 3 1.5-6.5L3 9l6-1z"></path></svg> Playlist • ${likedCount} lagu</div>
+                </div>
+            </div>
+        `;
+
+        const txP = db.transaction("playlists", "readonly");
+        const reqP = txP.objectStore("playlists").getAll();
+        reqP.onsuccess = function() {
+            const playlists = reqP.result;
+            playlists.forEach(p => {
+                html += `
+                    <div class="lib-item" onclick="openPlaylistView('${p.id}')">
+                        <img src="${p.img || 'https://via.placeholder.com/120?text=+'}" class="lib-item-img" onerror="this.src='https://via.placeholder.com/120?text=+'">
+                        <div class="lib-item-info">
+                            <div class="lib-item-title">${p.name}</div>
+                            <div class="lib-item-sub">Playlist • SANN404 FORUM</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                <div class="lib-item">
+                    <div class="lib-item-img add-btn circle">
+                        <svg viewBox="0 0 24 24" style="fill:white; width:32px; height:32px;"><path d="M11 11V4h2v7h7v2h-7v7h-2v-7H4v-2h7z"></path></svg>
+                    </div>
+                    <div class="lib-item-info"><div class="lib-item-title">Tambahkan artis</div></div>
+                </div>
+                <div class="lib-item">
+                    <div class="lib-item-img add-btn add-btn-sq">
+                        <svg viewBox="0 0 24 24" style="fill:white; width:32px; height:32px;"><path d="M11 11V4h2v7h7v2h-7v7h-2v-7H4v-2h7z"></path></svg>
+                    </div>
+                    <div class="lib-item-info"><div class="lib-item-title">Tambahkan podcast</div></div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+        };
+    };
+}
+
+let currentPlaylistTracks = [];
+
+function openPlaylistView(id) {
+    switchView('playlist');
+    const container = document.getElementById('playlistTracksContainer');
+    container.innerHTML = '<div style="color:var(--text-sub); text-align:center;">Memuat daftar lagu...</div>';
+
+    if (id === 'liked') {
+        document.getElementById('playlistNameDisplay').innerText = "Lagu yang Disukai";
+        document.getElementById('playlistImageDisplay').src = "1ced33a183cb33692d94252ad74fa4d9 (1).jpg";
+        
+        const tx = db.transaction("liked_songs", "readonly");
+        const req = tx.objectStore("liked_songs").getAll();
+        req.onsuccess = () => {
+            currentPlaylistTracks = req.result;
+            document.getElementById('playlistStatsDisplay').innerText = `${req.result.length} lagu disimpan`;
+            renderTracksInPlaylist(req.result);
+        };
+    } else {
+        const tx = db.transaction("playlists", "readonly");
+        const req = tx.objectStore("playlists").get(id);
+        req.onsuccess = () => {
+            const p = req.result;
+            currentPlaylistTracks = p.tracks || [];
+            document.getElementById('playlistNameDisplay').innerText = p.name;
+            document.getElementById('playlistImageDisplay').src = p.img || 'https://via.placeholder.com/240/282828/ffffff?text=+';
+            const trackCount = p.tracks ? p.tracks.length : 0;
+            document.getElementById('playlistStatsDisplay').innerText = `${trackCount} lagu disimpan`;
+            renderTracksInPlaylist(p.tracks || []);
+        };
+    }
+}
+
+function playFirstPlaylistTrack() {
+    if(currentPlaylistTracks && currentPlaylistTracks.length > 0) {
+        const firstTrack = currentPlaylistTracks[0];
+        const trackData = encodeURIComponent(JSON.stringify(firstTrack));
+        playMusic(firstTrack.videoId, trackData);
+    }
+}
+
+function renderTracksInPlaylist(tracks) {
+    const container = document.getElementById('playlistTracksContainer');
+    if (!tracks || tracks.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-sub); text-align:center;">Playlist ini masih kosong.</div>';
+        return;
+    }
+    let html = '';
+    tracks.forEach(t => html += createListHTML(t));
+    container.innerHTML = html;
+}
+
+let base64PlaylistImage = '';
+
+function openCreatePlaylist() { document.getElementById('createPlaylistModal').style.display = 'block'; }
+function closeCreatePlaylist() {
+    document.getElementById('createPlaylistModal').style.display = 'none';
+    document.getElementById('cpName').value = '';
+    document.getElementById('cpPreview').src = 'https://via.placeholder.com/120x120?text=+';
+    base64PlaylistImage = '';
+}
+
+function previewImage(event) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        document.getElementById('cpPreview').src = reader.result;
+        base64PlaylistImage = reader.result;
+    };
+    if(file) reader.readAsDataURL(file);
+}
+
+function saveNewPlaylist() {
+    const name = document.getElementById('cpName').value || "Playlist baruku";
+    const newPlaylist = { id: Date.now().toString(), name: name, img: base64PlaylistImage, tracks: [] };
+    
+    const tx = db.transaction("playlists", "readwrite");
+    tx.objectStore("playlists").put(newPlaylist);
+    tx.oncomplete = function() {
+        closeCreatePlaylist();
+        renderLibraryUI();
+    };
+}
+
+function openAddToPlaylistModal() {
+    if(!currentTrack) return;
+    const tx = db.transaction("playlists", "readonly");
+    const req = tx.objectStore("playlists").getAll();
+    req.onsuccess = () => {
+        let html = '';
+        req.result.forEach(p => {
+            html += `
+                <div class="lib-item" onclick="addTrackToPlaylist('${p.id}')" style="margin-bottom: 12px; cursor: pointer;">
+                    <img src="${p.img || 'https://via.placeholder.com/50'}" style="width:50px; height:50px; object-fit:cover; border-radius:4px;" onerror="this.src='https://via.placeholder.com/50'">
+                    <div style="color:white; font-size:16px;">${p.name}</div>
+                </div>`;
+        });
+        if(req.result.length === 0) html = '<div style="color:#a7a7a7; text-align:center;">Belum ada playlist. Buat dulu di Koleksi Kamu.</div>';
+        document.getElementById('addToPlaylistList').innerHTML = html;
+        document.getElementById('addToPlaylistModal').style.display = 'flex';
+    };
+}
+
+function closeAddToPlaylistModal() { document.getElementById('addToPlaylistModal').style.display = 'none'; }
+
+function addTrackToPlaylist(playlistId) {
+    const tx = db.transaction("playlists", "readwrite");
+    const store = tx.objectStore("playlists");
+    const req = store.get(playlistId);
+    req.onsuccess = () => {
+        const p = req.result;
+        if(!p.tracks) p.tracks = [];
+        if(!p.tracks.find(t => t.videoId === currentTrack.videoId)) {
+            p.tracks.push(currentTrack);
+            store.put(p);
+            showToast('Ditambahkan ke ' + p.name); // Notifikasi Modern
+        } else {
+            showToast('Sudah ada di ' + p.name); // Notifikasi Modern
+        }
+        closeAddToPlaylistModal();
+    };
+}
+
+window.onload = () => {
+    loadHomeData();
+    renderSearchCategories();
+};
